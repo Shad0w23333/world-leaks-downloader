@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Rust/Tauri build output
+target/
+src-tauri/target/
+src-tauri/gen/
+
+# Packaged extension artifacts
+*.xpi
+*.zip
+
+# Local input/output data
+List of files.txt
+download.txt
+selenium-downloads/
+src-tauri/*.xlsx
+
+# Local screenshots and visual test captures
+selenium-*.png
+aligned-tree-row.png
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log

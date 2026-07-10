@@ -1,0 +1,27 @@
+[package]
+name = "world-leaks-downloader"
+version = "0.1.0"
+description = "Cross-platform resumable downloader for Tor/onion path lists."
+edition = "2021"
+
+[lib]
+name = "world_leaks_downloader"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+futures-util = "0.3"
+percent-encoding = "2.3"
+reqwest = { version = "0.12", default-features = false, features = ["brotli", "deflate", "gzip", "rustls-tls", "socks", "stream", "zstd"] }
+rfd = "0.17.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+url = "2.5"
+
+[dev-dependencies]
+tempfile = "3"

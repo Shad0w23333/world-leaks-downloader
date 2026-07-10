@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>World Leaks Downloader</title>
+    <link rel="stylesheet" href="vendor/wunderbaum/wunderbaum.css">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">World Leaks Downloader</p>
+          <h1>队列下载</h1>
+        </div>
+        <p id="status" role="status" aria-live="polite"></p>
+      </header>
+
+      <section class="panel controls-panel">
+        <div class="panel-heading">
+          <h2>下载设置</h2>
+        </div>
+
+        <div class="controls">
+          <div class="top-fields">
+            <div class="field storage-field">
+              <label for="base-folder">保存目录</label>
+              <div class="directory-picker">
+                <input id="base-folder" type="text" value="" placeholder="请选择保存目录" readonly>
+                <button id="select-base-folder" class="directory-picker-button secondary" type="button">
+                  <span class="directory-picker-icon" aria-hidden="true"></span>
+                  选择文件夹
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="catalog-source-row">
+            <div class="field company-field">
+              <label for="company-select">公司</label>
+              <div class="company-picker">
+                <select id="company-select">
+                  <option value="">正在加载公司列表...</option>
+                </select>
+                <button id="refresh-companies" class="icon-button secondary" type="button" title="刷新公司列表和 Path" aria-label="刷新公司列表和 Path">↻</button>
+              </div>
+            </div>
+            <div id="import-progress" class="import-progress" hidden>
+              <div class="import-progress-track">
+                <span id="import-progress-bar"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bottom-controls">
+            <div class="mini-settings">
+              <div class="field delay-field">
+                <label for="delay">间隔</label>
+                <input id="delay" type="number" min="0" max="60000" step="250">
+              </div>
+              <div class="field">
+                <label for="max-concurrent">并发</label>
+                <input id="max-concurrent" type="number" min="1" max="100" step="1">
+              </div>
+            </div>
+            <section class="actions" aria-label="下载操作">
+              <button id="start" type="button">开始</button>
+              <button id="pause" type="button" class="secondary">暂停</button>
+              <button id="cancel" type="button" class="secondary">取消下载</button>
+              <button id="retry" type="button" class="secondary">重试失败</button>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel directory-panel" aria-label="目录树">
+        <div class="panel-heading directory-heading">
+          <div class="directory-title-row">
+            <h2>目录</h2>
+            <div class="summary" aria-label="队列状态">
+              <span id="downloading">下载中 0</span>
+              <span id="error">失败 0</span>
+            </div>
+          </div>
+          <span id="speed" class="speed-pill" aria-label="当前下载速度">0 KB/s</span>
+        </div>
+        <div class="directory-tree-frame">
+          <div class="directory-tree-header" aria-hidden="true">
+            <span>名称</span>
+            <span class="tree-header-count">下载数量/总数量</span>
+            <span class="tree-header-size">大小</span>
+          </div>
+          <div id="directories"></div>
+        </div>
+      </section>
+
+      <p class="hint">只用于你有授权访问的页面。文件会保存到上方配置的本机目录。</p>
+    </main>
+
+    <script src="vendor/wunderbaum/wunderbaum.umd.min.js"></script>
+    <script src="desktop-runtime.js"></script>
+    <script src="background.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

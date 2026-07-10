@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window-events",
+  "description": "Allows the desktop window to receive native download and catalog progress events.",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}
