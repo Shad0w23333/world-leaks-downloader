@@ -129,6 +129,7 @@ const pendingNodeUpdates = new Map();
 const activeDownloadIds = new Set();
 const downloadIdToItemId = new Map();
 const userCancelledDownloadIds = new Set();
+let selectionRevision = 0;
 
 initialize();
 
@@ -402,10 +403,12 @@ async function setSelection(target, selected) {
     return getSelectionOnlyState();
   }
 
-  materializeAncestorManualStates(node);
+  const nextRevision = nextSelectionRevision();
   node.manualCheckState = nextState;
+  node.manualCheckRevision = nextRevision;
   if (node.kind === "file" && node.item) {
     node.item.manualSelected = selected;
+    node.item.manualSelectionRevision = nextRevision;
   }
   recomputeCalculatedStatesFrom(node);
   await savePathSelectionOverride(node.kind, node.path || path, selected);
@@ -542,6 +545,11 @@ async function savePathExclusionOverride(kind, path, excluded) {
 
 function persistentSelectionPath(path) {
   return sanitizePath(path || "").normalize("NFC");
+}
+
+function nextSelectionRevision() {
+  selectionRevision += 1;
+  return selectionRevision;
 }
 
 function parentPathForItem(item) {
@@ -1894,7 +1902,8 @@ function snapshotDirectoryCheckStates() {
   const states = new Map();
   for (const [path, node] of directoryNodeIndex.entries()) {
     states.set(path, {
-      manualCheckState: node.manualCheckState || null
+      manualCheckState: node.manualCheckState || null,
+      manualCheckRevision: manualCheckRevision(node)
     });
   }
   return states;
@@ -1957,6 +1966,7 @@ function applyPreviousDirectoryState(directory, previousDirectoryStates) {
     return;
   }
   directory.manualCheckState = previous.manualCheckState || null;
+  directory.manualCheckRevision = Number(previous.manualCheckRevision) || 0;
 }
 
 function incrementDirectorySummary(directory, item) {
@@ -2090,25 +2100,33 @@ function nodeSelectionState(node) {
   return effectiveNodeCheckState(node);
 }
 
-function nodeCheckState(node) {
-  if (!node) {
-    return "all";
-  }
-  return node.manualCheckState || node.calculatedCheckState || "all";
+function effectiveNodeCheckState(node) {
+  return effectiveNodeCheckStateWithRevision(node).state;
 }
 
-function effectiveNodeCheckState(node) {
+function effectiveNodeCheckStateWithRevision(node) {
   if (!node) {
-    return "all";
+    return { state: "all", revision: 0 };
   }
-  if (node.manualCheckState) {
-    return node.manualCheckState;
+
+  const ownRevision = manualCheckRevision(node);
+  let manualState = node.manualCheckState || "";
+  let manualRevision = ownRevision;
+  const inherited = latestAncestorManualCheckState(node);
+  if (inherited && inherited.revision > manualRevision) {
+    manualState = inherited.state;
+    manualRevision = inherited.revision;
   }
-  const inheritedState = nearestAncestorManualCheckState(node);
-  if (inheritedState) {
-    return inheritedState;
+
+  const calculatedState = node.calculatedCheckState || "all";
+  const calculatedRevision = calculatedCheckRevision(node);
+  if (node.kind === "directory" && calculatedState === "partial" && calculatedRevision > manualRevision) {
+    return { state: "partial", revision: calculatedRevision };
   }
-  return node.calculatedCheckState || "all";
+  if (manualState) {
+    return { state: manualState, revision: manualRevision };
+  }
+  return { state: calculatedState, revision: calculatedRevision };
 }
 
 function effectiveNodeExcluded(node) {
@@ -2136,15 +2154,32 @@ function directNodeExcluded(node) {
   return pathExclusionOverrides.get(`${keyKind}:${persistentSelectionPath(node.path)}`) === true;
 }
 
-function nearestAncestorManualCheckState(node) {
-  const paths = ancestorDirectoryPaths(node).reverse();
+function latestAncestorManualCheckState(node) {
+  let latest = null;
+  const paths = ancestorDirectoryPaths(node);
   for (const path of paths) {
     const ancestor = directoryNodeIndex.get(path);
     if (ancestor && ancestor.manualCheckState) {
-      return ancestor.manualCheckState;
+      const candidate = {
+        state: ancestor.manualCheckState,
+        revision: manualCheckRevision(ancestor)
+      };
+      if (!latest || candidate.revision > latest.revision) {
+        latest = candidate;
+      }
     }
   }
-  return null;
+  return latest;
+}
+
+function manualCheckRevision(node) {
+  const revision = Number(node && node.manualCheckRevision);
+  return Number.isFinite(revision) && revision > 0 ? revision : 0;
+}
+
+function calculatedCheckRevision(node) {
+  const revision = Number(node && node.calculatedCheckRevision);
+  return Number.isFinite(revision) && revision > 0 ? revision : 0;
 }
 
 function fileNodeByTarget(target, path) {
@@ -2162,46 +2197,6 @@ function fileNodeForItem(item) {
     return null;
   }
   return fileNodeIndex.get(item.id) || fileNodeIndex.get(`path:${queueItemPath(item)}`) || null;
-}
-
-function materializeAncestorManualStates(targetNode) {
-  const ancestors = ancestorDirectoryNodes(targetNode);
-  for (const ancestor of ancestors) {
-    const inheritedState = ancestor.manualCheckState;
-    if (!inheritedState) {
-      continue;
-    }
-    materializeStateBelowAncestor(ancestor, targetNode.path, inheritedState);
-    ancestor.manualCheckState = null;
-  }
-}
-
-function materializeStateBelowAncestor(ancestor, targetPath, stateValue) {
-  let current = ancestor;
-  let currentPath = current.path || "";
-  const parts = sanitizePath(targetPath).split("/").filter(Boolean);
-  const baseDepth = currentPath ? currentPath.split("/").filter(Boolean).length : 0;
-
-  for (let depth = baseDepth; depth < parts.length; depth += 1) {
-    const bucket = directoryChildrenIndex.get(currentPath) || createDirectoryBucket();
-    const nextPath = parts.slice(0, depth + 1).join("/");
-    for (const child of [...bucket.directories.values(), ...bucket.files]) {
-      if (child.path === nextPath || child.path === targetPath) {
-        continue;
-      }
-      child.manualCheckState = stateValue;
-      if (child.kind === "file" && child.item) {
-        child.item.manualSelected = stateValue === "all";
-      }
-    }
-
-    const nextDirectory = directoryNodeIndex.get(nextPath);
-    if (!nextDirectory) {
-      break;
-    }
-    current = nextDirectory;
-    currentPath = current.path;
-  }
 }
 
 function ancestorDirectoryNodes(node) {
@@ -2237,13 +2232,18 @@ function recomputeDirectoryCalculatedState(directory) {
   const children = bucket ? [...bucket.directories.values(), ...bucket.files] : [];
   if (!children.length) {
     directory.calculatedCheckState = "all";
+    directory.calculatedCheckRevision = 0;
     return;
   }
 
-  const states = children.map(nodeCheckState);
-  if (states.every((stateValue) => stateValue === "all")) {
+  const states = children.map(effectiveNodeCheckStateWithRevision);
+  directory.calculatedCheckRevision = states.reduce(
+    (maxRevision, stateValue) => Math.max(maxRevision, stateValue.revision),
+    0
+  );
+  if (states.every((stateValue) => stateValue.state === "all")) {
     directory.calculatedCheckState = "all";
-  } else if (states.every((stateValue) => stateValue === "none")) {
+  } else if (states.every((stateValue) => stateValue.state === "none")) {
     directory.calculatedCheckState = "none";
   } else {
     directory.calculatedCheckState = "partial";
@@ -2318,6 +2318,8 @@ function syncIndexedItemProgress(item) {
 }
 
 function syncFileNodeFromItem(file, item) {
+  file.manualCheckState = item.manualSelected === true ? "all" : item.manualSelected === false ? "none" : null;
+  file.manualCheckRevision = nonnegativeInteger(item.manualSelectionRevision, 0);
   file.status = item.status;
   file.completedCount = item.status === "done" ? 1 : 0;
   file.queuedCount = item.status === "queued" ? 1 : 0;
@@ -2397,6 +2399,9 @@ function normalizeQueueItem(item, baseFolder) {
     return null;
   }
 
+  const manualSelectionRevision = nonnegativeInteger(item.manualSelectionRevision, 0);
+  selectionRevision = Math.max(selectionRevision, manualSelectionRevision);
+
   return {
     url,
     path: suggestedPath,
@@ -2407,6 +2412,7 @@ function normalizeQueueItem(item, baseFolder) {
     sourceType: item.sourceType === "path-list" ? "path-list" : item.sourceType === "absolute-url" ? "absolute-url" : "",
     sourceKey: itemSourceKey(item),
     manualSelected: item.manualSelected === true ? true : item.manualSelected === false ? false : null,
+    manualSelectionRevision,
     status: "queued",
     error: "",
     note: "",
@@ -2751,7 +2757,9 @@ function createDirectoryNode(name, path, parentPath = "") {
     bytesReceived: 0,
     sizeBytes: metadataDirectorySize(path),
     manualCheckState: null,
+    manualCheckRevision: 0,
     calculatedCheckState: "all",
+    calculatedCheckRevision: 0,
     parent: null,
     children: new Map()
   };
@@ -2772,7 +2780,9 @@ function createFileNode(item, name, resolvedPath = "", parentPath = "") {
     downloadingCount: item.status === "downloading" ? 1 : 0,
     errorCount: item.status === "error" ? 1 : 0,
     manualCheckState: item.manualSelected === true ? "all" : item.manualSelected === false ? "none" : null,
+    manualCheckRevision: nonnegativeInteger(item.manualSelectionRevision, 0),
     calculatedCheckState: "all",
+    calculatedCheckRevision: 0,
     extension: fileExtension(name),
     status: item.status,
     url: item.url,
@@ -2835,6 +2845,14 @@ function clampNumber(value, min, max, fallback) {
     return fallback;
   }
   return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+function nonnegativeInteger(value, fallback = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    return fallback;
+  }
+  return Math.floor(number);
 }
 
 function nonnegativeByteCount(primary, fallback = 0) {
