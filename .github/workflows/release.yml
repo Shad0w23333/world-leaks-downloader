@@ -19,13 +19,8 @@ jobs:
         include:
           - platform: windows
             runner: windows-latest
-            bundles: |
-              src-tauri/target/release/bundle/nsis/*.exe
-              src-tauri/target/release/bundle/msi/*.msi
           - platform: macos
             runner: macos-latest
-            bundles: |
-              src-tauri/target/release/bundle/dmg/*.dmg
 
     steps:
       - name: Checkout
@@ -39,23 +34,15 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
-
-      - name: Build Tauri bundles
-        working-directory: src-tauri
-        run: cargo tauri build
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          draft: true
-          files: ${{ matrix.bundles }}
-
-      - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: world-leaks-downloader-${{ matrix.platform }}
-          path: ${{ matrix.bundles }}
-          if-no-files-found: error
+          projectPath: src-tauri
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('World Leaks Downloader {0}', github.ref_name) || '' }}
+          releaseDraft: true
+          prerelease: false
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: world-leaks-downloader-[platform]-[arch]-[bundle]

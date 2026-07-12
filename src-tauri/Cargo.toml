@@ -1,6 +1,6 @@
 [package]
 name = "world-leaks-downloader"
-version = "0.1.0"
+version = "0.1.1"
 description = "Cross-platform resumable downloader for Tor/onion path lists."
 edition = "2021"
 
