@@ -44,7 +44,7 @@ jobs:
           projectPath: src-tauri
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('World Leaks Downloader {0}', github.ref_name) || '' }}
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: world-leaks-downloader-[platform]-[arch]-[bundle]
@@ -64,7 +64,7 @@ jobs:
         if: matrix.platform == 'windows' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
           files: dist/world-leaks-downloader-${{ github.ref_name }}-windows-x64-portable.zip
 
       - name: Upload portable Windows zip artifact
