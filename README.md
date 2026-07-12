@@ -88,6 +88,22 @@ cargo tauri build
 
 The packaged output is written under `src-tauri\target\release\bundle\`.
 
+## Publishing a GitHub Release
+
+Release builds are produced by GitHub Actions when a version tag is pushed.
+The workflow builds Windows packages on `windows-latest` and a macOS `.dmg` on `macos-latest`, then uploads them to a draft GitHub Release.
+
+1. Update the version in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`.
+2. Commit the version change.
+3. Create and push a tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+4. Open the draft release on GitHub, check the uploaded packages, then publish it.
+
 ## Using the App
 
 1. Start Tor Browser or another Tor service if you need to download `.onion` URLs.
