@@ -144,10 +144,11 @@
     });
   }
 
-  async function revealLocalPath(path) {
+  async function revealLocalPath(path, options = {}) {
     return invoke("native_reveal_path", {
       request: {
-        path: normalizeDesktopFilename(path)
+        path: normalizeDesktopFilename(path),
+        isDirectory: Boolean(options && options.isDirectory)
       }
     });
   }

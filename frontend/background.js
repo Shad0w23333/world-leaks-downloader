@@ -213,7 +213,6 @@ async function addQueueItems(items, options, renderOptions = {}) {
     normalized.addedAt = Date.now() + added;
     state.items.push(normalized);
     indexKnownItem(normalized);
-    state.counts.total += 1;
     incrementCountsForItem(normalized);
     markDirectoryTreeDirty();
 
@@ -279,6 +278,7 @@ function isKnownQueueItem(item) {
 }
 
 function incrementCountsForItem(item) {
+  state.counts.total += 1;
   const status = item.status || "queued";
   state.counts[status] = (state.counts[status] || 0) + 1;
 }
@@ -611,7 +611,7 @@ async function cancelDownloads() {
   return getPublicState();
 }
 
-async function cancelActiveDownloadsForNode(node) {
+async function cancelActiveDownloadsForNode(node, options = {}) {
   const items = activeDownloadItemsForNode(node);
   if (!items.length) {
     return;
@@ -620,15 +620,23 @@ async function cancelActiveDownloadsForNode(node) {
   const changedShards = new Set();
   await Promise.all(items.map((item) => cancelActiveDownloadItem(item, changedShards, "Download cancelled because it was unchecked.")));
   resetDownloadTraversal();
-  markDirectoryViewDirty();
   await saveChangedShards(changedShards);
-  updateDirectoryTree();
-  broadcastState();
+  if (!options.suppressBroadcast) {
+    markDirectoryViewDirty();
+    updateDirectoryTree();
+  }
+  if (!options.suppressBroadcast) {
+    broadcastState();
+  }
 
   if (state.running) {
     clearTimeout(nextTimer);
     nextTimer = null;
-    await runNext();
+    if (options.suppressBroadcast) {
+      state.running = state.running && Boolean(state.counts.downloading);
+    } else {
+      await runNext();
+    }
   }
 }
 
@@ -643,7 +651,16 @@ function activeDownloadItemsForNode(node) {
   }
 
   const directoryPath = sanitizePath(node.path || "");
-  return state.items.filter((item) => isActiveDownloadItem(item) && itemIsUnderDirectory(item, directoryPath));
+  const items = [];
+  for (const downloadId of activeDownloadIds) {
+    const itemId = downloadIdToItemId.get(downloadId);
+    const file = itemId ? fileNodeIndex.get(itemId) : null;
+    const item = file && file.item;
+    if (item && isActiveDownloadItem(item) && itemIsUnderDirectory(item, directoryPath)) {
+      items.push(item);
+    }
+  }
+  return items;
 }
 
 function isActiveDownloadItem(item) {
@@ -848,8 +865,11 @@ async function runNext() {
   }
 
   if (!picked.length) {
-    if (!state.counts.queued && !state.counts.downloading) {
+    if (!state.counts.downloading) {
       state.running = false;
+      if (state.counts.queued) {
+        state.notice = "没有可下载的选中项目。";
+      }
       stopPolling();
       broadcastState();
     } else {
@@ -1025,7 +1045,8 @@ async function startBrowserDownload(downloadOptions) {
 async function reconcileDownload(downloadId) {
   await ensureLoaded();
   const itemId = downloadIdToItemId.get(downloadId);
-  const item = state.items.find((entry) => entry.id === itemId);
+  const file = itemId ? fileNodeIndex.get(itemId) : null;
+  const item = file && file.item;
   if (!item) {
     userCancelledDownloadIds.delete(downloadId);
     return;
@@ -1521,13 +1542,15 @@ function firstQueuedIndex() {
 }
 
 function rebuildDerivedState() {
+  recomputeCounts();
+  updateDirectoryTree();
+}
+
+function recomputeCounts() {
   state.counts = { total: 0, queued: 0, downloading: 0, done: 0, error: 0 };
   for (const item of state.items) {
-    state.counts.total += 1;
-    state.counts[item.status] = (state.counts[item.status] || 0) + 1;
+    incrementCountsForItem(item);
   }
-
-  updateDirectoryTree();
 }
 
 function updateDirectoryTree() {
@@ -1843,6 +1866,43 @@ function incrementDirectorySummary(directory, item) {
   if (item.status === "downloading") {
     directory.downloadingCount += 1;
   }
+  if (item.status === "error") {
+    directory.errorCount += 1;
+  }
+}
+
+function resetDirectorySummary(directory) {
+  directory.count = 0;
+  directory.completedCount = 0;
+  directory.queuedCount = 0;
+  directory.downloadingCount = 0;
+  directory.errorCount = 0;
+  directory.bytesReceived = 0;
+  directory.sizeBytes = metadataDirectorySize(directory.path);
+  directory.sizeLoading = false;
+}
+
+function recomputeIndexedDirectorySummaries() {
+  if (directoryChildrenIndexDirty) {
+    return;
+  }
+  for (const directory of directoryNodeIndex.values()) {
+    resetDirectorySummary(directory);
+  }
+  for (const item of state.items) {
+    for (const path of queueItemAncestorPaths(item)) {
+      const directory = directoryNodeIndex.get(path);
+      if (directory) {
+        incrementDirectorySummary(directory, item);
+      }
+    }
+  }
+  for (const item of state.items) {
+    const file = fileNodeForItem(item);
+    if (file) {
+      syncFileNodeFromItem(file, item);
+    }
+  }
 }
 
 function markDirectoryTreeDirty() {
@@ -1871,7 +1931,7 @@ function recomputeAllDirectoryCalculatedStates() {
 function serializeDirectoryChild(child) {
   const localPath = child.kind === "file"
     ? (child.item && child.item.filename) || ""
-    : sanitizeDownloadFilename([state.options.baseFolder, child.path].filter(Boolean).join("/"));
+    : localPathForDirectoryNode(child);
   return {
     id: child.id,
     kind: child.kind,
@@ -1890,8 +1950,32 @@ function serializeDirectoryChild(child) {
     sizeBytes: child.sizeBytes,
     sizeLoading: child.sizeLoading === true,
     localPath,
-    hasChildren: child.kind === "directory" ? child.count > 0 : false
+    hasChildren: child.kind === "directory" ? child.hasChildren !== false : false
   };
+}
+
+function localPathForDirectoryNode(directory) {
+  const fallback = sanitizeDownloadFilename([state.options.baseFolder, directory.path].filter(Boolean).join("/"));
+  const directoryPath = sanitizePath(directory && directory.path);
+  const item = state.items.find((candidate) => itemIsUnderDirectory(candidate, directoryPath) && candidate.filename);
+  if (!item) {
+    return fallback;
+  }
+
+  const itemPathParts = queueItemPath(item).split("/").filter(Boolean);
+  const directoryPathParts = directoryPath.split("/").filter(Boolean);
+  const localParts = String(item.filename || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/, "")
+    .split("/")
+    .filter(Boolean);
+  const leafParts = Math.max(0, itemPathParts.length - directoryPathParts.length);
+  if (!localParts.length || leafParts >= localParts.length) {
+    return fallback;
+  }
+  return localParts.slice(0, localParts.length - leafParts).join("/");
 }
 
 function nodeSelectionState(node) {
@@ -2066,6 +2150,12 @@ function syncIndexedItemStatus(item, previousStatus, nextStatus) {
     if (nextStatus === "downloading") {
       directory.downloadingCount += 1;
     }
+    if (previousStatus === "error" && directory.errorCount > 0) {
+      directory.errorCount -= 1;
+    }
+    if (nextStatus === "error") {
+      directory.errorCount += 1;
+    }
   }
 }
 
@@ -2099,6 +2189,7 @@ function syncFileNodeFromItem(file, item) {
   file.completedCount = item.status === "done" ? 1 : 0;
   file.queuedCount = item.status === "queued" ? 1 : 0;
   file.downloadingCount = item.status === "downloading" ? 1 : 0;
+  file.errorCount = item.status === "error" ? 1 : 0;
   file.bytesReceived = item.bytesReceived || 0;
   file.totalBytes = item.totalBytes || -1;
   file.sizeBytes = itemDisplaySize(item);
@@ -2523,6 +2614,7 @@ function createDirectoryNode(name, path, parentPath = "") {
     completedCount: 0,
     queuedCount: 0,
     downloadingCount: 0,
+    errorCount: 0,
     bytesReceived: 0,
     sizeBytes: metadataDirectorySize(path),
     manualCheckState: null,
@@ -2545,6 +2637,7 @@ function createFileNode(item, name, resolvedPath = "", parentPath = "") {
     completedCount: item.status === "done" ? 1 : 0,
     queuedCount: item.status === "queued" ? 1 : 0,
     downloadingCount: item.status === "downloading" ? 1 : 0,
+    errorCount: item.status === "error" ? 1 : 0,
     manualCheckState: item.manualSelected === true ? "all" : item.manualSelected === false ? "none" : null,
     calculatedCheckState: "all",
     extension: fileExtension(name),

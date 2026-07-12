@@ -289,6 +289,7 @@
     }
 
     if (nextState.selectionOnly) {
+      applyNodeUpdates(nextState.nodeUpdates || []);
       return Promise.resolve();
     }
 
@@ -885,6 +886,7 @@
       status: node.status || "",
       count: node.count || 0,
       completedCount: node.completedCount || 0,
+      queuedCount: node.queuedCount || 0,
       downloadingCount: node.downloadingCount || 0,
       bytesReceived: node.bytesReceived || 0,
       totalBytes: node.totalBytes || -1,
@@ -1089,7 +1091,7 @@
   }
 
   function showTreeContextMenu(event, node) {
-    if (!node || !node.localPath || !desktop.files || typeof desktop.files.reveal !== "function") {
+    if (!node) {
       return;
     }
     event.preventDefault();
@@ -1099,27 +1101,52 @@
     const menu = document.createElement("div");
     menu.className = "tree-context-menu";
     menu.setAttribute("role", "menu");
-    const revealButton = document.createElement("button");
-    revealButton.type = "button";
-    revealButton.setAttribute("role", "menuitem");
-    revealButton.textContent = "在文件浏览器中显示";
-    revealButton.addEventListener("click", async (clickEvent) => {
-      clickEvent.stopPropagation();
-      closeTreeContextMenu();
-      try {
-        await desktop.files.reveal(node.localPath);
-      } catch (error) {
-        setStatus(error.message || String(error), true);
+
+    const buttons = [];
+    const createButton = (label, handler, options = {}) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "menuitem");
+      button.textContent = label;
+      if (options.className) {
+        button.className = options.className;
       }
-    });
-    menu.append(revealButton);
+      if (options.disabled) {
+        button.disabled = true;
+      }
+      button.addEventListener("click", async (clickEvent) => {
+        clickEvent.stopPropagation();
+        if (button.disabled) {
+          return;
+        }
+        closeTreeContextMenu();
+        try {
+          await handler();
+        } catch (error) {
+          setStatus(error.message || String(error), true);
+        }
+      });
+      menu.append(button);
+      buttons.push(button);
+      return button;
+    };
+
+    if (node.localPath && desktop.files && typeof desktop.files.reveal === "function") {
+      createButton("在文件浏览器中显示", async () => {
+        await desktop.files.reveal(node.localPath, { isDirectory: node.kind === "directory" });
+      });
+    }
+
     document.body.append(menu);
     treeContextMenu = menu;
 
     const bounds = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - bounds.width - 8))}px`;
     menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - bounds.height - 8))}px`;
-    revealButton.focus();
+    const focusTarget = buttons.find((button) => !button.disabled) || buttons[0];
+    if (focusTarget) {
+      focusTarget.focus();
+    }
   }
 
   function closeTreeContextMenu() {

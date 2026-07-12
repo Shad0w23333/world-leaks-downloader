@@ -20,15 +20,7 @@ body {
 .app-shell {
   width: min(1180px, calc(100vw - 40px));
   margin: 0 auto;
-  padding: 34px 0 40px;
-}
-
-.app-header {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 18px;
+  padding: 10px 0 40px;
 }
 
 .eyebrow {
@@ -78,6 +70,7 @@ h2 {
   display: grid;
   align-items: start;
   gap: 14px;
+  margin-top: 0;
 }
 
 .controls-panel .panel-heading {
@@ -609,10 +602,24 @@ button:disabled {
   cursor: pointer;
 }
 
+.tree-context-menu button.danger {
+  color: #b42318;
+}
+
+.tree-context-menu button:disabled {
+  color: #9a9aa0;
+  cursor: default;
+}
+
 .tree-context-menu button:hover,
 .tree-context-menu button:focus-visible {
   outline: none;
   background: #e8f2ff;
+}
+
+.tree-context-menu button:disabled:hover,
+.tree-context-menu button:disabled:focus-visible {
+  background: transparent;
 }
 
 .fallback-children {
@@ -981,12 +988,7 @@ button:disabled {
 @media (max-width: 760px) {
   .app-shell {
     width: min(100vw - 24px, 680px);
-    padding-top: 22px;
-  }
-
-  .app-header {
-    grid-template-columns: 1fr;
-    display: grid;
+    padding-top: 8px;
   }
 
   #status {

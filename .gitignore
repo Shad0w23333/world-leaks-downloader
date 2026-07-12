@@ -2,6 +2,7 @@
 node_modules/
 
 # Rust/Tauri build output
+dist
 target/
 src-tauri/target/
 src-tauri/gen/

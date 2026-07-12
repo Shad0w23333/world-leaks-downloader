@@ -75,6 +75,8 @@ pub struct NativeDownloadExistsManyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct NativeRevealPathRequest {
     pub path: String,
+    #[serde(default)]
+    pub is_directory: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +117,7 @@ pub struct NativePathSelectionUpdateRequest {
 #[serde(rename_all = "camelCase")]
 pub struct NativePathSelections {
     pub version: u32,
+    #[serde(default)]
     pub entries: HashMap<String, bool>,
 }
 
@@ -362,7 +365,7 @@ async fn local_file_status(filename: String) -> Result<NativeDownloadFileStatus,
 
 #[tauri::command]
 pub async fn native_reveal_path(request: NativeRevealPathRequest) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || reveal_path(PathBuf::from(request.path)))
+    tokio::task::spawn_blocking(move || reveal_path(PathBuf::from(request.path), request.is_directory))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -540,7 +543,12 @@ fn normalize_selection_path(path: &str) -> String {
         .replace('\\', "/")
 }
 
-fn reveal_path(path: PathBuf) -> Result<(), String> {
+#[cfg(target_os = "windows")]
+fn windows_explorer_path(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('/', "\\")
+}
+
+fn reveal_path(path: PathBuf, is_directory_hint: bool) -> Result<(), String> {
     let target =
         nearest_existing_path(path).ok_or_else(|| "找不到可打开的本地目录。".to_string())?;
 
@@ -556,11 +564,12 @@ fn reveal_path(path: PathBuf) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut command = Command::new("explorer");
-        if target.is_file() {
-            command.arg(format!("/select,{}", target.display()));
+        let mut command = Command::new("explorer.exe");
+        if target.is_file() && !is_directory_hint {
+            command.arg("/select,");
+            command.arg(windows_explorer_path(&target));
         } else {
-            command.arg(&target);
+            command.arg(windows_explorer_path(&target));
         }
         command
     };
@@ -690,4 +699,5 @@ mod tests {
         assert!(!selections.entries.contains_key("file:root/child/file.txt"));
         assert_eq!(selections.entries.get("file:other/file.txt"), Some(&false));
     }
+
 }
