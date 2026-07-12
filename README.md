@@ -1,8 +1,6 @@
 # World Leaks Downloader
 
-World Leaks Downloader 是一个基于 Tauri 2 的桌面下载工具，用于导入路径列表，并通过 Rust 后端执行可恢复的文件下载。
-
-它既可以下载普通 HTTP/HTTPS 地址，也可以通过本地 Tor SOCKS 代理下载 `.onion` 地址。默认代理地址为 `socks5h://127.0.0.1:9150`，对应 Tor Browser 常见的 SOCKS 端口。
+World Leaks Downloader 可以批量下载 World Leaks 的文件。使用前请先打开 Tor 浏览器，并确认 Tor 浏览器已经连接到 Tor 网络。
 
 ## 项目结构
 
@@ -122,8 +120,8 @@ Windows 不再生成 MSI，因此 release 中不会出现带 `_en-US.msi` 后缀
 4. 创建并推送版本 tag：
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 5. 打开 GitHub 上生成的草稿 release，确认安装包和免安装包无误后发布。

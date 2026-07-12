@@ -78,6 +78,8 @@
     loadCompanyList(true, true).catch((error) => setCatalogError(error));
   });
   selectBaseFolderButton.addEventListener("click", selectBaseFolder);
+  baseFolderInput.addEventListener("change", () => scheduleSaveOptions({ forceTreeReload: true }));
+  baseFolderInput.addEventListener("input", () => scheduleSaveOptions({ forceTreeReload: true }));
   for (const input of [delayInput, maxConcurrentInput]) {
     input.addEventListener("change", scheduleSaveOptions);
     input.addEventListener("input", scheduleSaveOptions);
@@ -161,7 +163,7 @@
           size: directory.size
         }))
       });
-      resetFallbackTreeState();
+      resetDirectoryTreeState();
 
       let added = 0;
       let totalPaths = 0;
@@ -212,12 +214,21 @@
     }
   }
 
-  async function saveOptions() {
+  async function saveOptions(options = {}) {
     clearTimeout(saveOptionsTimer);
-    const options = readOptions();
-    await desktop.persistence.saveSettings(options);
-    const nextState = await desktop.runtime.sendMessage({ type: "queue:update-options", options });
-    renderState(nextState);
+    const forceTreeReload = Boolean(options.forceTreeReload);
+    const queueOptions = readOptions();
+    if (forceTreeReload) {
+      resetDirectoryTreeState();
+    }
+    await desktop.persistence.saveSettings(queueOptions);
+    const nextState = await desktop.runtime.sendMessage({ type: "queue:update-options", options: queueOptions });
+    await renderState(nextState);
+    if (forceTreeReload) {
+      const latestState = await desktop.runtime.sendMessage({ type: "queue:get-state" });
+      resetDirectoryTreeState();
+      await renderDirectoryTree(latestState);
+    }
   }
 
   async function selectBaseFolder() {
@@ -232,7 +243,12 @@
       }
       baseFolderInput.value = selected;
       baseFolderInput.title = selected;
-      await saveOptions();
+      resetDirectoryTreeState();
+      if (companySelect.value) {
+        await importCompany(companySelect.value, false);
+      } else {
+        await saveOptions({ forceTreeReload: true });
+      }
     } catch (error) {
       setStatus(error.message || String(error), true);
     } finally {
@@ -240,10 +256,10 @@
     }
   }
 
-  function scheduleSaveOptions() {
+  function scheduleSaveOptions(options = {}) {
     clearTimeout(saveOptionsTimer);
     saveOptionsTimer = window.setTimeout(() => {
-      saveOptions().catch((error) => {
+      saveOptions(options).catch((error) => {
         setStatus(error.message || String(error), true);
       });
     }, 180);
@@ -262,7 +278,7 @@
 
   function renderState(nextState) {
     if (!nextState) {
-      return;
+      return Promise.resolve();
     }
 
     queueLocksSaveDirectory = Boolean(nextState.running) || Number(nextState.counts && nextState.counts.downloading) > 0;
@@ -273,10 +289,10 @@
     }
 
     if (nextState.selectionOnly) {
-      return;
+      return Promise.resolve();
     }
 
-    renderDirectoryTree(nextState).catch((error) => {
+    return renderDirectoryTree(nextState).catch((error) => {
       setStatus(`Directory tree failed: ${error.message || error}`, true);
     });
   }
@@ -536,13 +552,23 @@
       kind: node.kind || "",
       path: node.path || "",
       count: Number(node.count) || 0,
+      completedCount: Number(node.completedCount) || 0,
+      queuedCount: Number(node.queuedCount) || 0,
+      downloadingCount: Number(node.downloadingCount) || 0,
+      status: node.status || "",
+      bytesReceived: Number(node.bytesReceived) || 0,
+      totalBytes: Number(node.totalBytes) || -1,
+      sizeBytes: node.sizeBytes === null || node.sizeBytes === undefined ? null : Number(node.sizeBytes),
+      sizeLoading: node.sizeLoading === true,
+      localPath: node.localPath || "",
+      selection: node.selection || "",
       hasChildren: node.hasChildren !== false,
       lazy: node.lazy === true,
       children: (node.children || []).map(treeRenderSignatureNode)
     };
   }
 
-  function resetFallbackTreeState() {
+  function resetDirectoryTreeState() {
     fallbackTreeSignature = "";
     directoryTreeSignature = "";
     fallbackExpandedPaths.clear();
