@@ -104,6 +104,7 @@ let nodeUpdateTimer = null;
 let downloadTraversalStack = null;
 let directoryTreeDirty = false;
 let directoryChildrenIndexDirty = true;
+let directoryTreeRevision = 0;
 let downloadSpeedBps = 0;
 let speedWindowBytes = 0;
 let speedWindowStartedAt = 0;
@@ -180,6 +181,7 @@ function getPublicState() {
     options: state.options,
     counts: state.counts,
     downloadSpeedBps: currentDownloadSpeedBps(),
+    treeRevision: directoryTreeRevision,
     directories: state.directories,
     notice: state.notice || ""
   };
@@ -2011,6 +2013,7 @@ function recomputeIndexedDirectorySummaries() {
 function markDirectoryTreeDirty() {
   directoryTreeDirty = true;
   directoryChildrenIndexDirty = true;
+  directoryTreeRevision += 1;
 }
 
 function markDirectoryViewDirty() {

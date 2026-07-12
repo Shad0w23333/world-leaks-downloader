@@ -18,6 +18,7 @@
   let directoryTree = null;
   let directoryTreeSignature = "";
   let fallbackTreeSignature = "";
+  let renderedTreeRevision = null;
   const fallbackExpandedPaths = new Set();
   let directoryRenderSequence = 0;
   let suppressTreeSelectionEvents = false;
@@ -392,6 +393,11 @@
   }
 
   async function renderDirectoryTree(nextState) {
+    const treeRevision = Number(nextState && nextState.treeRevision) || 0;
+    if (renderedTreeRevision === treeRevision && hasRenderedDirectoryTree()) {
+      return;
+    }
+
     let directories = nextState.directories || [];
     const totalCount = Number(nextState.counts && nextState.counts.total) || 0;
     const visibleCount = totalCount;
@@ -413,11 +419,12 @@
     }
     const data = directories.map(toWunderbaumNode);
     if (useFallbackTree) {
-      await renderFallbackTree(data);
+      await renderFallbackTree(data, treeRevision);
       return;
     }
     const signature = treeRenderSignature(data);
     if (directoryTree && signature === directoryTreeSignature) {
+      renderedTreeRevision = treeRevision;
       return;
     }
 
@@ -429,6 +436,7 @@
       try {
         await directoryTree.reload({ source: data });
         directoryTreeSignature = signature;
+        renderedTreeRevision = treeRevision;
         if (directoryTree.count() === 0 && data.length) {
           await directoryTree.load(data);
         }
@@ -478,6 +486,7 @@
         init: async () => {
           try {
             directoryTreeSignature = signature;
+            renderedTreeRevision = treeRevision;
             if (directoryTree && directoryTree.count() === 0 && data.length) {
               await directoryTree.load(data);
             }
@@ -524,9 +533,10 @@
     }
   }
 
-  async function renderFallbackTree(nodes) {
+  async function renderFallbackTree(nodes, treeRevision) {
     const signature = treeRenderSignature(nodes);
     if (signature === fallbackTreeSignature && directoryList.querySelector(".fallback-tree")) {
+      renderedTreeRevision = treeRevision;
       return;
     }
 
@@ -546,6 +556,7 @@
     }
     directoryList.append(root);
     fallbackTreeSignature = signature;
+    renderedTreeRevision = treeRevision;
     await restoreFallbackExpandedPaths(renderSequence);
     if (renderSequence === directoryRenderSequence) {
       restoreDirectoryTreeScrollTop(scrollTop);
@@ -560,20 +571,8 @@
     return {
       key: node.key || treeKeyForNode(node),
       kind: node.kind || "",
+      name: node.name || "",
       path: node.path || "",
-      count: Number(node.count) || 0,
-      completedCount: Number(node.completedCount) || 0,
-      queuedCount: Number(node.queuedCount) || 0,
-      downloadingCount: Number(node.downloadingCount) || 0,
-      status: node.status || "",
-      bytesReceived: Number(node.bytesReceived) || 0,
-      totalBytes: Number(node.totalBytes) || -1,
-      sizeBytes: node.sizeBytes === null || node.sizeBytes === undefined ? null : Number(node.sizeBytes),
-      sizeLoading: node.sizeLoading === true,
-      localPath: node.localPath || "",
-      selection: node.selection || "",
-      excluded: node.excluded === true,
-      directExcluded: node.directExcluded === true,
       hasChildren: node.hasChildren !== false,
       lazy: node.lazy === true,
       children: (node.children || []).map(treeRenderSignatureNode)
@@ -583,7 +582,14 @@
   function resetDirectoryTreeState() {
     fallbackTreeSignature = "";
     directoryTreeSignature = "";
+    renderedTreeRevision = null;
     fallbackExpandedPaths.clear();
+  }
+
+  function hasRenderedDirectoryTree() {
+    return useFallbackTree
+      ? Boolean(directoryList.querySelector(".fallback-tree"))
+      : Boolean(directoryTree);
   }
 
   function createFallbackRow(node, level) {
