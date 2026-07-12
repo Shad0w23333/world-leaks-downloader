@@ -110,7 +110,10 @@ pub struct NativeMetadataSizeEntry {
 pub struct NativePathSelectionUpdateRequest {
     pub kind: String,
     pub path: String,
-    pub selected: bool,
+    #[serde(default)]
+    pub selected: Option<bool>,
+    #[serde(default)]
+    pub excluded: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +122,8 @@ pub struct NativePathSelections {
     pub version: u32,
     #[serde(default)]
     pub entries: HashMap<String, bool>,
+    #[serde(default)]
+    pub exclusions: HashMap<String, bool>,
 }
 
 impl Default for NativePathSelections {
@@ -126,6 +131,7 @@ impl Default for NativePathSelections {
         Self {
             version: 1,
             entries: HashMap::new(),
+            exclusions: HashMap::new(),
         }
     }
 }
@@ -365,9 +371,11 @@ async fn local_file_status(filename: String) -> Result<NativeDownloadFileStatus,
 
 #[tauri::command]
 pub async fn native_reveal_path(request: NativeRevealPathRequest) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || reveal_path(PathBuf::from(request.path), request.is_directory))
-        .await
-        .map_err(|error| error.to_string())?
+    tokio::task::spawn_blocking(move || {
+        reveal_path(PathBuf::from(request.path), request.is_directory)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -524,17 +532,24 @@ fn apply_path_selection_update(
     } else {
         "dir"
     };
+    if let Some(selected) = request.selected {
+        update_path_override(&mut selections.entries, kind, &path, selected);
+    }
+    if let Some(excluded) = request.excluded {
+        update_path_override(&mut selections.exclusions, kind, &path, excluded);
+    }
+    selections.version = 2;
+}
+
+fn update_path_override(entries: &mut HashMap<String, bool>, kind: &str, path: &str, value: bool) {
     if kind == "dir" {
         let descendant_prefix = format!("{path}/");
-        selections.entries.retain(|key, _| {
+        entries.retain(|key, _| {
             let stored_path = key.split_once(':').map(|(_, value)| value).unwrap_or("");
             stored_path != path && !stored_path.starts_with(&descendant_prefix)
         });
     }
-    selections
-        .entries
-        .insert(format!("{kind}:{path}"), request.selected);
-    selections.version = 1;
+    entries.insert(format!("{kind}:{path}"), value);
 }
 
 fn normalize_selection_path(path: &str) -> String {
@@ -690,7 +705,8 @@ mod tests {
             NativePathSelectionUpdateRequest {
                 kind: "directory".to_string(),
                 path: "/root".to_string(),
-                selected: true,
+                selected: Some(true),
+                excluded: None,
             },
         );
 
@@ -700,4 +716,37 @@ mod tests {
         assert_eq!(selections.entries.get("file:other/file.txt"), Some(&false));
     }
 
+    #[test]
+    fn directory_exclusion_replaces_descendant_rules() {
+        let mut selections = NativePathSelections::default();
+        selections
+            .exclusions
+            .insert("dir:root/child".to_string(), true);
+        selections
+            .exclusions
+            .insert("file:root/child/file.txt".to_string(), false);
+        selections
+            .exclusions
+            .insert("file:other/file.txt".to_string(), true);
+
+        apply_path_selection_update(
+            &mut selections,
+            NativePathSelectionUpdateRequest {
+                kind: "directory".to_string(),
+                path: "/root".to_string(),
+                selected: None,
+                excluded: Some(true),
+            },
+        );
+
+        assert_eq!(selections.exclusions.get("dir:root"), Some(&true));
+        assert!(!selections.exclusions.contains_key("dir:root/child"));
+        assert!(!selections
+            .exclusions
+            .contains_key("file:root/child/file.txt"));
+        assert_eq!(
+            selections.exclusions.get("file:other/file.txt"),
+            Some(&true)
+        );
+    }
 }

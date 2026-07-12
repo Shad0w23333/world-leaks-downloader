@@ -293,6 +293,11 @@
       return Promise.resolve();
     }
 
+    if (nextState.exclusionOnly) {
+      applyNodeUpdates(nextState.exclusionUpdates || nextState.nodeUpdates || []);
+      return Promise.resolve();
+    }
+
     return renderDirectoryTree(nextState).catch((error) => {
       setStatus(`Directory tree failed: ${error.message || error}`, true);
     });
@@ -335,10 +340,13 @@
     }
 
     wrapper.__treeNode = { ...(wrapper.__treeNode || {}), ...node };
+    wrapper.classList.toggle("excluded", node.excluded === true);
+    wrapper.classList.toggle("direct-excluded", node.directExcluded === true);
     const row = wrapper.querySelector(":scope > .fallback-row");
     if (!row) {
       return;
     }
+    row.classList.toggle("excluded", node.excluded === true);
 
     setFallbackWrapperSelection(wrapper, node.selection || "all");
 
@@ -350,6 +358,7 @@
     const title = row.querySelector(":scope > .fallback-title");
     if (title) {
       title.textContent = node.title || node.name || "";
+      appendTitleCopyLink(title, node);
     }
     renderCountCell(row.querySelector(":scope > .fallback-count"), node);
     renderSizeCell(row.querySelector(":scope > .fallback-size"), node);
@@ -563,6 +572,8 @@
       sizeLoading: node.sizeLoading === true,
       localPath: node.localPath || "",
       selection: node.selection || "",
+      excluded: node.excluded === true,
+      directExcluded: node.directExcluded === true,
       hasChildren: node.hasChildren !== false,
       lazy: node.lazy === true,
       children: (node.children || []).map(treeRenderSignatureNode)
@@ -578,6 +589,8 @@
   function createFallbackRow(node, level) {
     const wrapper = document.createElement("div");
     wrapper.className = "fallback-node";
+    wrapper.classList.toggle("excluded", node.excluded === true);
+    wrapper.classList.toggle("direct-excluded", node.directExcluded === true);
     wrapper.dataset.path = node.path || "";
     wrapper.dataset.kind = node.kind || "";
     wrapper.__treeNode = node;
@@ -585,6 +598,7 @@
 
     const row = document.createElement("div");
     row.className = "fallback-row";
+    row.classList.toggle("excluded", node.excluded === true);
     row.style.setProperty("--level", String(level));
 
     const expander = document.createElement("button");
@@ -609,6 +623,7 @@
     const title = document.createElement("span");
     title.className = "fallback-title";
     title.textContent = node.title || node.name || "";
+    appendTitleCopyLink(title, node);
 
     const size = document.createElement("span");
     size.className = "fallback-size tree-size-column";
@@ -642,9 +657,14 @@
       return;
     }
 
-    if (node.url) {
-      row.append(createCopyButton(node.url));
-    }
+    row.append(createProgressRing(
+      fileProgress(node),
+      node.status === "done",
+      {
+        loading: node.status === "downloading",
+        label: fileStatusLabel(node)
+      }
+    ));
   }
 
   async function toggleFallbackDirectory(wrapper, node, level, expander) {
@@ -800,6 +820,70 @@
     }
   }
 
+  async function updateExclusion(node, excluded, wrapper = null) {
+    try {
+      const response = await desktop.runtime.sendMessage({
+        type: "queue:set-exclusion",
+        target: {
+          kind: node.kind,
+          id: node.id,
+          path: node.path
+        },
+        excluded
+      });
+      updateVisibleExclusion(node, excluded, wrapper, response && response.exclusionUpdates);
+      setStatus(excluded ? "已排除。" : "已取消排除。", false, true);
+    } catch (error) {
+      setStatus(error.message || String(error), true);
+    }
+  }
+
+  function updateVisibleExclusion(node, excluded, wrapper, exclusionUpdates = []) {
+    if (!useFallbackTree) {
+      updateVisibleWunderbaumExclusion(node, excluded, exclusionUpdates);
+      return;
+    }
+
+    const targetWrapper = wrapper || findFallbackWrapper(node.path || "");
+    if (targetWrapper) {
+      setFallbackWrapperExclusion(targetWrapper, excluded, excluded);
+    }
+
+    for (const update of exclusionUpdates || []) {
+      const updateWrapper = findFallbackWrapper(update.path || "");
+      if (updateWrapper) {
+        setFallbackWrapperExclusion(updateWrapper, update.excluded === true, update.directExcluded === true);
+      }
+    }
+  }
+
+  function updateVisibleWunderbaumExclusion(node, excluded, exclusionUpdates = []) {
+    if (!directoryTree || !node) {
+      return;
+    }
+    const treeNode = directoryTree.findKey && directoryTree.findKey(treeKeyForNode(node));
+    if (treeNode) {
+      setWunderbaumNodeExclusion(treeNode, excluded, excluded);
+    }
+
+    for (const update of exclusionUpdates || []) {
+      const updateNode = directoryTree.findKey && directoryTree.findKey(treeKeyForNode(update));
+      if (updateNode) {
+        setWunderbaumNodeExclusion(updateNode, update.excluded === true, update.directExcluded === true);
+      }
+    }
+  }
+
+  function setWunderbaumNodeExclusion(treeNode, excluded, directExcluded) {
+    if (treeNode.data) {
+      treeNode.data.excluded = excluded === true;
+      treeNode.data.directExcluded = directExcluded === true;
+    }
+    if (treeNode.render) {
+      treeNode.render();
+    }
+  }
+
   function updateVisibleWunderbaumSelection(node, selected, selectionUpdates = []) {
     if (!directoryTree || !node) {
       return;
@@ -893,7 +977,9 @@
       sizeBytes: node.sizeBytes,
       sizeLoading: node.sizeLoading === true,
       localPath: node.localPath || "",
-      selection: node.selection
+      selection: node.selection,
+      excluded: node.excluded === true,
+      directExcluded: node.directExcluded === true
     };
     const children = (node.children || []).map(toWunderbaumNode);
     if (children.length) {
@@ -914,8 +1000,10 @@
 
     title.classList.add("tree-title-content");
     if (event.nodeElem) {
+      event.nodeElem.classList.toggle("tree-node-excluded", data.excluded === true);
       event.nodeElem.oncontextmenu = (contextEvent) => showTreeContextMenu(contextEvent, data);
     }
+    title.classList.toggle("tree-node-title-excluded", data.excluded === true);
     title
       .querySelectorAll(".tree-copy-link, .tree-progress-ring")
       .forEach((element) => element.remove());
@@ -942,6 +1030,13 @@
       title.append(createCopyButton(data.url));
     }
 
+  }
+
+  function appendTitleCopyLink(title, node) {
+    if (!title || !node || !node.url) {
+      return;
+    }
+    title.append(createCopyButton(node.url));
   }
 
   function createCopyButton(url) {
@@ -1025,6 +1120,22 @@
       return 0;
     }
     return ((Number(node.bytesReceived) || 0) / total) * 100;
+  }
+
+  function fileStatusLabel(node) {
+    if (!node || !node.status) {
+      return "";
+    }
+    if (node.status === "done") {
+      return "已下载";
+    }
+    if (node.status === "downloading") {
+      return "下载中";
+    }
+    if (node.status === "error") {
+      return "下载失败";
+    }
+    return "等待下载";
   }
 
   function formatBytes(value) {
@@ -1137,6 +1248,14 @@
       });
     }
 
+    if (node.excluded === true && node.directExcluded !== true) {
+      createButton("由父节点排除", async () => {}, { disabled: true });
+    } else {
+      createButton(node.directExcluded === true ? "取消排除" : "排除", async () => {
+        await updateExclusion(node, node.directExcluded !== true);
+      }, { className: node.directExcluded === true ? "" : "danger" });
+    }
+
     document.body.append(menu);
     treeContextMenu = menu;
 
@@ -1146,6 +1265,20 @@
     const focusTarget = buttons.find((button) => !button.disabled) || buttons[0];
     if (focusTarget) {
       focusTarget.focus();
+    }
+  }
+
+  function setFallbackWrapperExclusion(wrapper, excluded, directExcluded) {
+    const node = wrapper.__treeNode;
+    if (node) {
+      node.excluded = excluded === true;
+      node.directExcluded = directExcluded === true;
+    }
+    wrapper.classList.toggle("excluded", excluded === true);
+    wrapper.classList.toggle("direct-excluded", directExcluded === true);
+    const row = wrapper.querySelector(":scope > .fallback-row");
+    if (row) {
+      row.classList.toggle("excluded", excluded === true);
     }
   }
 

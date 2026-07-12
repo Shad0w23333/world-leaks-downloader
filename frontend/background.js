@@ -52,6 +52,10 @@ desktop.runtime.onMessage.addListener((message) => {
     return setSelection(message.target || {}, Boolean(message.selected));
   }
 
+  if (message.type === "queue:set-exclusion") {
+    return setExclusion(message.target || {}, Boolean(message.excluded));
+  }
+
   return undefined;
 });
 
@@ -119,6 +123,7 @@ const metadataSizeRequests = new Map();
 const catalogDirectorySizes = new Map();
 let metadataViewGeneration = 0;
 const pathSelectionOverrides = new Map();
+const pathExclusionOverrides = new Map();
 const pendingNodeUpdates = new Map();
 const activeDownloadIds = new Set();
 const downloadIdToItemId = new Map();
@@ -372,7 +377,7 @@ function itemSourceKey(item) {
 function isEffectivelySelectedItem(item) {
   const node = fileNodeForItem(item);
   if (node) {
-    return effectiveNodeCheckState(node) === "all";
+    return effectiveNodeCheckState(node) === "all" && !effectiveNodeExcluded(node);
   }
   return true;
 }
@@ -412,14 +417,56 @@ async function setSelection(target, selected) {
   return getSelectionOnlyState(node);
 }
 
+async function setExclusion(target, excluded) {
+  await ensureLoaded();
+  ensureDirectoryChildrenIndex();
+  const kind = target.kind === "file" ? "file" : "directory";
+  const path = sanitizePath(target.path || "");
+  let node = null;
+
+  if (kind === "file") {
+    node = fileNodeByTarget(target, path);
+  } else {
+    node = directoryNodeIndex.get(path);
+  }
+
+  if (!node) {
+    return getExclusionOnlyState();
+  }
+
+  await savePathExclusionOverride(node.kind, node.path || path, excluded);
+  state.cursor = 0;
+  resetDownloadTraversal();
+  queueNodeUpdate(node);
+
+  if (excluded) {
+    await cancelActiveDownloadsForNode(node, {
+      note: "Download cancelled because it was excluded."
+    });
+  }
+
+  flushNodeUpdatesThrottled();
+  broadcastStateThrottled();
+  return getExclusionOnlyState(node);
+}
+
 function loadPathSelectionOverrides(saved) {
   pathSelectionOverrides.clear();
+  pathExclusionOverrides.clear();
   const entries = saved && typeof saved === "object" && saved.entries && typeof saved.entries === "object"
     ? saved.entries
     : {};
   for (const [key, value] of Object.entries(entries)) {
     if (/^(?:dir|file):/.test(key) && typeof value === "boolean") {
       pathSelectionOverrides.set(key, value);
+    }
+  }
+  const exclusions = saved && typeof saved === "object" && saved.exclusions && typeof saved.exclusions === "object"
+    ? saved.exclusions
+    : {};
+  for (const [key, value] of Object.entries(exclusions)) {
+    if (/^(?:dir|file):/.test(key) && typeof value === "boolean") {
+      pathExclusionOverrides.set(key, value);
     }
   }
 }
@@ -468,6 +515,29 @@ async function savePathSelectionOverride(kind, path, selected) {
   });
 }
 
+async function savePathExclusionOverride(kind, path, excluded) {
+  const normalizedPath = persistentSelectionPath(path);
+  if (!normalizedPath) {
+    return;
+  }
+  const keyKind = kind === "file" ? "file" : "dir";
+  if (keyKind === "dir") {
+    const descendantPrefix = `${normalizedPath}/`;
+    for (const key of Array.from(pathExclusionOverrides.keys())) {
+      const storedPath = key.slice(key.indexOf(":") + 1);
+      if (storedPath === normalizedPath || storedPath.startsWith(descendantPrefix)) {
+        pathExclusionOverrides.delete(key);
+      }
+    }
+  }
+  pathExclusionOverrides.set(`${keyKind}:${normalizedPath}`, Boolean(excluded));
+  await desktop.files.updatePathExclusion({
+    kind: keyKind,
+    path: normalizedPath,
+    excluded: Boolean(excluded)
+  });
+}
+
 function persistentSelectionPath(path) {
   return sanitizePath(path || "").normalize("NFC");
 }
@@ -489,6 +559,25 @@ function getSelectionOnlyState(changedNode = null) {
   };
 }
 
+function getExclusionOnlyState(changedNode = null) {
+  return {
+    running: state.running,
+    options: state.options,
+    counts: { ...state.counts },
+    downloadSpeedBps: currentDownloadSpeedBps(),
+    directories: [],
+    exclusionOnly: true,
+    exclusionUpdates: exclusionUpdatesForNode(changedNode)
+  };
+}
+
+function exclusionUpdatesForNode(node) {
+  if (!node) {
+    return [];
+  }
+  return [serializeDirectoryChild(node)];
+}
+
 function selectionUpdatesForNode(node) {
   if (!node) {
     return [];
@@ -505,7 +594,9 @@ function selectionUpdateForNode(node) {
     id: node.id,
     kind: node.kind,
     path: node.path || "",
-    selection: effectiveNodeCheckState(node)
+    selection: effectiveNodeCheckState(node),
+    excluded: effectiveNodeExcluded(node),
+    directExcluded: directNodeExcluded(node)
   };
 }
 
@@ -618,7 +709,11 @@ async function cancelActiveDownloadsForNode(node, options = {}) {
   }
 
   const changedShards = new Set();
-  await Promise.all(items.map((item) => cancelActiveDownloadItem(item, changedShards, "Download cancelled because it was unchecked.")));
+  await Promise.all(items.map((item) => cancelActiveDownloadItem(
+    item,
+    changedShards,
+    options.note || "Download cancelled because it was unchecked."
+  )));
   resetDownloadTraversal();
   await saveChangedShards(changedShards);
   if (!options.suppressBroadcast) {
@@ -900,6 +995,9 @@ function getNextDownloadFile() {
     const node = entry.node || entry;
     const forced = Boolean(entry.forced);
     if (node.kind === "directory") {
+      if (effectiveNodeExcluded(node)) {
+        continue;
+      }
       const selection = forced ? "all" : effectiveNodeCheckState(node);
       if (selection === "none" || !node.queuedCount) {
         continue;
@@ -915,6 +1013,9 @@ function getNextDownloadFile() {
     if (item.status !== "queued") {
       continue;
     }
+    if (effectiveNodeExcluded(node)) {
+      continue;
+    }
     if (!forced && effectiveNodeCheckState(node) !== "all") {
       continue;
     }
@@ -926,10 +1027,12 @@ function getNextDownloadFile() {
 function downloadTraversalEntries(path, forced) {
   const entries = sortedDirectoryEntries(path);
   if (forced) {
-    return entries.map((node) => ({ node, forced: true }));
+    return entries
+      .filter((node) => !effectiveNodeExcluded(node))
+      .map((node) => ({ node, forced: true }));
   }
   return entries
-    .filter((node) => effectiveNodeCheckState(node) !== "none")
+    .filter((node) => effectiveNodeCheckState(node) !== "none" && !effectiveNodeExcluded(node))
     .map((node) => ({ node, forced: false }));
 }
 
@@ -1942,6 +2045,8 @@ function serializeDirectoryChild(child) {
     queuedCount: child.queuedCount || 0,
     downloadingCount: child.downloadingCount || 0,
     selection: effectiveNodeCheckState(child),
+    excluded: effectiveNodeExcluded(child),
+    directExcluded: directNodeExcluded(child),
     extension: child.extension || "",
     status: child.status || "",
     url: child.url || "",
@@ -2001,6 +2106,31 @@ function effectiveNodeCheckState(node) {
     return inheritedState;
   }
   return node.calculatedCheckState || "all";
+}
+
+function effectiveNodeExcluded(node) {
+  if (!node) {
+    return false;
+  }
+  if (directNodeExcluded(node)) {
+    return true;
+  }
+  const paths = ancestorDirectoryPaths(node).reverse();
+  for (const path of paths) {
+    const ancestor = directoryNodeIndex.get(path);
+    if (ancestor && directNodeExcluded(ancestor)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function directNodeExcluded(node) {
+  if (!node || !node.path) {
+    return false;
+  }
+  const keyKind = node.kind === "file" ? "file" : "dir";
+  return pathExclusionOverrides.get(`${keyKind}:${persistentSelectionPath(node.path)}`) === true;
 }
 
 function nearestAncestorManualCheckState(node) {

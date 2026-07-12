@@ -463,6 +463,23 @@ button:disabled {
   background: #f5f7fb;
 }
 
+.fallback-node.excluded .fallback-row,
+.fallback-row.excluded {
+  color: #8a8a8e;
+}
+
+.fallback-node.excluded .fallback-row .fallback-title,
+.fallback-row.excluded .fallback-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+}
+
+.fallback-node.excluded .fallback-row .fallback-icon,
+.fallback-row.excluded .fallback-icon {
+  opacity: 0.55;
+  filter: grayscale(0.35);
+}
+
 .fallback-expander {
   display: inline-flex;
   align-items: center;
@@ -709,6 +726,22 @@ button:disabled {
 
 #directories div.wb-node-list div.wb-row:hover {
   background: #f5f7fb;
+}
+
+#directories div.wb-node-list div.wb-row.tree-node-excluded {
+  color: #8a8a8e;
+}
+
+#directories div.wb-node-list div.wb-row.tree-node-excluded .wb-icon {
+  opacity: 0.55;
+  filter: grayscale(0.35);
+}
+
+#directories .wb-title.tree-node-title-excluded,
+#directories .tree-node-title-excluded {
+  color: #8a8a8e;
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
 }
 
 #directories .wb-title {
@@ -1132,6 +1165,14 @@ button:disabled {
   .summary span,
   .checkbox {
     color: #f5f5f7;
+  }
+
+  #directories .wb-title.tree-node-title-excluded,
+  #directories .tree-node-title-excluded,
+  #directories div.wb-node-list div.wb-row.tree-node-excluded,
+  .fallback-node.excluded .fallback-row,
+  .fallback-row.excluded {
+    color: #8e8e93;
   }
 
   #directories div.wb-node-list div.wb-row:hover {

@@ -179,6 +179,16 @@
     });
   }
 
+  async function updatePathExclusion(update) {
+    return invoke("native_path_selection_update", {
+      request: {
+        kind: String(update && update.kind || "file"),
+        path: String(update && update.path || ""),
+        excluded: Boolean(update && update.excluded)
+      }
+    });
+  }
+
   async function cachedFileSizes(paths) {
     return invoke("native_metadata_sizes", {
       request: {
@@ -311,6 +321,7 @@
       defaultDownloadDirectory,
       loadPathSelections,
       updatePathSelection,
+      updatePathExclusion,
       cachedSizes: cachedFileSizes,
       cachedMetadataSizes
     }
