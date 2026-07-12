@@ -19,8 +19,10 @@ jobs:
         include:
           - platform: windows
             runner: windows-latest
+            bundle-args: --bundles nsis
           - platform: macos
             runner: macos-latest
+            bundle-args: --bundles dmg
 
     steps:
       - name: Checkout
@@ -46,3 +48,29 @@ jobs:
           prerelease: false
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: world-leaks-downloader-[platform]-[arch]-[bundle]
+          args: ${{ matrix.bundle-args }}
+
+      - name: Create portable Windows zip
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Compress-Archive `
+            -LiteralPath src-tauri/target/release/world-leaks-downloader.exe `
+            -DestinationPath dist/world-leaks-downloader-${{ github.ref_name }}-windows-x64-portable.zip `
+            -Force
+
+      - name: Upload portable Windows zip to release
+        if: matrix.platform == 'windows' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/world-leaks-downloader-${{ github.ref_name }}-windows-x64-portable.zip
+
+      - name: Upload portable Windows zip artifact
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-leaks-downloader-windows-x64-portable
+          path: dist/world-leaks-downloader-${{ github.ref_name }}-windows-x64-portable.zip
+          if-no-files-found: error

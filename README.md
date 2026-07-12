@@ -1,19 +1,19 @@
 # World Leaks Downloader
 
-World Leaks Downloader is a Tauri 2 desktop app for importing path lists and downloading files with resumable Rust-backed transfers.
+World Leaks Downloader 是一个基于 Tauri 2 的桌面下载工具，用于导入路径列表，并通过 Rust 后端执行可恢复的文件下载。
 
-The app can work with normal HTTP/HTTPS URLs and with `.onion` URLs through a local Tor SOCKS proxy. By default it uses `socks5h://127.0.0.1:9150`, which matches the common Tor Browser SOCKS port.
+它既可以下载普通 HTTP/HTTPS 地址，也可以通过本地 Tor SOCKS 代理下载 `.onion` 地址。默认代理地址为 `socks5h://127.0.0.1:9150`，对应 Tor Browser 常见的 SOCKS 端口。
 
-## Project Layout
+## 项目结构
 
 ```text
-frontend/      Static HTML, CSS, and JavaScript UI
-src-tauri/     Rust backend and Tauri configuration
+frontend/      静态 HTML、CSS 和 JavaScript 界面
+src-tauri/     Rust 后端和 Tauri 配置
 ```
 
-## Prerequisites
+## 环境准备
 
-Install these before building on any platform:
+所有平台都需要先安装：
 
 - Rust: https://www.rust-lang.org/tools/install
 - Tauri CLI:
@@ -22,15 +22,59 @@ Install these before building on any platform:
 cargo install tauri-cli --version "^2"
 ```
 
+## Windows
+
+先安装 Microsoft C++ 编译工具：
+
+1. 安装 Visual Studio Build Tools 2022。
+2. 勾选 `Desktop development with C++` 工作负载。
+3. 确认已选择 Windows SDK。
+
+然后在仓库根目录打开 PowerShell。
+
+检查项目：
+
+```powershell
+cd src-tauri
+cargo check
+cargo test
+```
+
+以开发模式运行桌面程序：
+
+```powershell
+cd src-tauri
+cargo run
+```
+
+构建发布版本：
+
+```powershell
+cd src-tauri
+cargo tauri build --bundles nsis
+```
+
+构建后的安装包位于：
+
+```text
+src-tauri\target\release\bundle\
+```
+
+直接可运行的免安装程序位于：
+
+```text
+src-tauri\target\release\world-leaks-downloader.exe
+```
+
 ## macOS
 
-Install Apple command line tools:
+先安装 Apple 命令行工具：
 
 ```bash
 xcode-select --install
 ```
 
-Check the project:
+检查项目：
 
 ```bash
 cd src-tauri
@@ -38,95 +82,75 @@ cargo check
 cargo test
 ```
 
-Run the desktop app in development mode:
+以开发模式运行桌面程序：
 
 ```bash
 cd src-tauri
 cargo run
 ```
 
-Build a distributable app:
+构建 `.dmg` 安装包：
 
 ```bash
 cd src-tauri
-cargo tauri build
+cargo tauri build --bundles dmg
 ```
 
-The packaged output is written under `src-tauri/target/release/bundle/`.
+构建后的文件位于：
 
-## Windows
-
-Install the Microsoft C++ build tools:
-
-1. Install Visual Studio Build Tools 2022.
-2. Select the "Desktop development with C++" workload.
-3. Make sure the Windows SDK is selected.
-
-Then open PowerShell in the repository root.
-
-Check the project:
-
-```powershell
-cd src-tauri
-cargo check
-cargo test
+```text
+src-tauri/target/release/bundle/
 ```
 
-Run the desktop app in development mode:
+## 发布 GitHub Release
 
-```powershell
-cd src-tauri
-cargo run
-```
+推送版本 tag 后，GitHub Actions 会自动构建发布包，并上传到草稿 GitHub Release。
 
-Build a distributable installer:
+当前发布产物包括：
 
-```powershell
-cd src-tauri
-cargo tauri build
-```
+- Windows NSIS 安装包：`*.exe`
+- Windows 免安装压缩包：`*-windows-x64-portable.zip`
+- macOS 安装包：`*.dmg`
 
-The packaged output is written under `src-tauri\target\release\bundle\`.
+Windows 不再生成 MSI，因此 release 中不会出现带 `_en-US.msi` 后缀的文件。
 
-## Publishing a GitHub Release
+发布步骤：
 
-Release builds are produced by GitHub Actions when a version tag is pushed.
-The workflow builds Windows packages on `windows-latest` and a macOS `.dmg` on `macos-latest`, then uploads them to a draft GitHub Release.
-
-1. Update the version in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`.
-2. Commit the version change.
-3. Create and push a tag:
+1. 更新 `src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 中的版本号。
+2. 如版本号变化会影响 `src-tauri/Cargo.lock`，一并更新并提交。
+3. 提交代码。
+4. 创建并推送版本 tag：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
-4. Open the draft release on GitHub, check the uploaded packages, then publish it.
+5. 打开 GitHub 上生成的草稿 release，确认安装包和免安装包无误后发布。
 
-## Using the App
+## 使用方法
 
-1. Start Tor Browser or another Tor service if you need to download `.onion` URLs.
-2. Open the app.
-3. Set `Base URL` if your path list contains relative paths.
-4. Choose a save directory.
-5. Import a path txt file.
-6. Adjust interval and concurrency.
-7. Start the queue.
+1. 如果需要下载 `.onion` 地址，先启动 Tor Browser 或其他 Tor 服务。
+2. 打开 World Leaks Downloader。
+3. 如果路径列表中包含相对路径，先设置 `Base URL`。
+4. 选择保存目录。
+5. 导入路径 txt 文件。
+6. 调整下载间隔和并发数量。
+7. 启动下载队列。
 
-Path txt rules:
+路径 txt 文件规则：
 
-- Empty lines are ignored.
-- Lines starting with `#` or `//` are ignored.
-- A line can be a relative path, such as `folder/file.zip`.
-- A line can be a full `http://` or `https://` URL.
-- Relative paths are joined with `Base URL`.
-- Spaces in paths are preserved and URL-encoded automatically.
+- 空行会被忽略。
+- 以 `#` 或 `//` 开头的行会被忽略。
+- 每一行可以是相对路径，例如 `folder/file.zip`。
+- 每一行也可以是完整的 `http://` 或 `https://` URL。
+- 相对路径会与 `Base URL` 拼接。
+- 路径中的空格会被保留，并自动进行 URL 编码。
 
-Downloads are written as `.part` files while incomplete. If a download is restarted, the app reads the existing `.part` size and resumes with an HTTP `Range` request when the server supports it.
+下载未完成时会写入 `.part` 文件。如果重新开始下载，程序会读取现有 `.part` 文件大小，并在服务器支持时通过 HTTP `Range` 请求继续下载。
 
-## Notes
+## 注意事项
 
-- If your Tor SOCKS port is not `127.0.0.1:9150`, update the proxy setting in the app.
-- Only use this tool for pages and files you are authorized to access.
-- The app does not bypass website permissions or network access controls.
+- 如果你的 Tor SOCKS 端口不是 `127.0.0.1:9150`，请在程序中修改代理设置。
+- 只应下载你有权限访问的页面和文件。
+- 本工具不会绕过网站权限、登录限制或网络访问控制。
